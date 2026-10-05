@@ -1,3 +1,4 @@
+// Command humancron describes AWS/EventBridge cron expressions.
 package main
 
 import (
@@ -6,8 +7,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/iilei/humancron"
+)
+
+const (
+	exitUsage         = 2
+	cronFieldCount    = 6
+	weekdayFieldIndex = 4
 )
 
 func main() {
@@ -23,11 +31,11 @@ func runCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		"read a JSON array of cron expressions from stdin",
 	)
 	if err := flags.Parse(args); err != nil {
-		return 2
+		return exitUsage
 	}
 
 	if *jsonInput {
-		if err := runJSON(stdin, stdout); err != nil {
+		if err := runJSON(stdin, stdout, stderr); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
@@ -43,30 +51,31 @@ func runCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	writeDescriptions(expressions, stdout)
+	writeDescriptions(expressions, stdout, stderr)
 	return 0
 }
 
-func runJSON(input io.Reader, output io.Writer) error {
+func runJSON(input io.Reader, output, stderr io.Writer) error {
 	var expressions []string
 	decoder := json.NewDecoder(input)
 	if err := decoder.Decode(&expressions); err != nil {
 		return fmt.Errorf("invalid JSON: %w", err)
 	}
 
-	writeDescriptions(expressions, output)
+	writeDescriptions(expressions, output, stderr)
 	return nil
 }
 
-func writeDescriptions(expressions []string, output io.Writer) {
+func writeDescriptions(expressions []string, output, stderr io.Writer) {
 	for _, expr := range expressions {
+		warnNumericWeekday(expr, stderr)
 		cron, err := humancron.Parse(expr)
 		if err != nil {
 			fmt.Fprintf(output, "%s -> INVALID: %v\n", expr, err)
 			continue
 		}
 
-		description, err := humancron.Describe(cron)
+		description, err := humancron.Describe(&cron)
 		if err != nil {
 			fmt.Fprintf(output, "%s -> UNSUPPORTED: %v\n", expr, err)
 			continue
@@ -74,4 +83,17 @@ func writeDescriptions(expressions []string, output io.Writer) {
 
 		fmt.Fprintf(output, "%s -> %s\n", expr, description)
 	}
+}
+
+func warnNumericWeekday(expr string, stderr io.Writer) {
+	fields := strings.Fields(expr)
+	if len(fields) != cronFieldCount || !strings.ContainsAny(fields[weekdayFieldIndex], "0123456789") {
+		return
+	}
+
+	fmt.Fprintf(stderr,
+		"WARNING: %q uses numeric weekdays; AWS/EventBridge uses 1=SUN through 7=SAT, not zero-based numbering. "+
+			"Use three-letter English abbreviations (SUN, MON, TUE, WED, THU, FRI, SAT) to avoid ambiguity.\n",
+		expr,
+	)
 }

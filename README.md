@@ -36,11 +36,23 @@ Examples:
 Weekday numbers use EventBridge's `1-7` numbering, where `1` is Sunday and `7`
 is Saturday. Weekday names are case-insensitive.
 
+The CLI warns on standard error for each six-field expression whose weekday
+field contains digits, including numeric lists, ranges, and invalid values such
+as `0`. This applies to both argument and JSON input modes. Descriptions and
+exit statuses are unchanged. Use the three-letter English abbreviations
+`SUN`, `MON`, `TUE`, `WED`, `THU`, `FRI`, and `SAT` to avoid numbering ambiguity.
+
 ## Project layout
 
 - `cron.go` and `describe.go` provide the `humancron` Go package for parsing and
   describing expressions.
 - `cmd/humancron` contains the CLI entrypoint and its tests.
+
+## Go API
+
+`Parse(expression)` returns a `Cron` value and an error. Pass its address to
+`Describe(&cron)`, which returns a description and an error without modifying
+the value. `Describe(nil)` returns an error.
 
 ## Development tasks
 

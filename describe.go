@@ -7,7 +7,13 @@ import (
 	"strings"
 )
 
-func Describe(cron Cron) (string, error) {
+const decimalBase = 10
+
+func Describe(cron *Cron) (string, error) {
+	if cron == nil {
+		return "", errors.New("cron cannot be nil")
+	}
+
 	if cron.Month != "*" {
 		return "", errors.New(
 			"only '*' is currently supported for month",
@@ -26,7 +32,7 @@ func Describe(cron Cron) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		recurrence = fmt.Sprintf("Every %s", days)
+		recurrence = "Every " + days
 	} else {
 		if cron.DayOfWeek != "?" {
 			return "", errors.New(
@@ -38,7 +44,7 @@ func Describe(cron Cron) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		recurrence = fmt.Sprintf("Every month on the %s", day)
+		recurrence = "Every month on the " + day
 	}
 
 	minute, err := strconv.Atoi(cron.Minute)
@@ -61,19 +67,15 @@ func Describe(cron Cron) (string, error) {
 
 func describeDayOfMonth(s string) (string, error) {
 	day, err := strconv.Atoi(s)
-	if err != nil || day < 1 || day > 31 {
+	if err != nil || day < 1 || day > maxDayOfMonth {
 		return "", fmt.Errorf("invalid day-of-month: %q", s)
 	}
 
-	suffix := "th"
+	suffixes := [...]string{"th", "st", "nd", "rd"}
+	suffix := suffixes[0]
 	if day%100 < 11 || day%100 > 13 {
-		switch day % 10 {
-		case 1:
-			suffix = "st"
-		case 2:
-			suffix = "nd"
-		case 3:
-			suffix = "rd"
+		if digit := day % decimalBase; digit < len(suffixes) {
+			suffix = suffixes[digit]
 		}
 	}
 
@@ -98,7 +100,7 @@ func describeWeekdays(s string) (string, error) {
 func describeWeekday(s string) (string, error) {
 	if strings.Contains(s, "-") {
 		parts := strings.Split(s, "-")
-		if len(parts) != 2 {
+		if len(parts) != rangeBoundsCount {
 			return "", fmt.Errorf(
 				"unsupported weekday expression: %q",
 				s,
@@ -135,7 +137,7 @@ func parseWeekday(s string) (int, error) {
 	}
 
 	n, err := strconv.Atoi(s)
-	if err != nil || n < 1 || n > 7 {
+	if err != nil || n < firstWeekday || n > lastWeekday {
 		return 0, fmt.Errorf("invalid weekday: %q", s)
 	}
 

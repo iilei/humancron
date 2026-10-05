@@ -2,10 +2,24 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/iilei/humancron"
+)
+
+const (
+	weekdayRangeExpr    = "0 22 ? * MON-FRI *"
+	monthlyListExpr     = "0 22 1,15 * ? *"
+	invalidMinute       = "invalid minute"
+	invalidHour         = "invalid hour"
+	monday              = "MON"
+	jsonFlag            = "--json"
+	workweekDescription = "Every Monday through Friday at 22:00"
+	zeroWeekdayExpr     = "0 22 ? * 0 *"
+	monthlyExpr         = "15 14 1 * ? *"
 )
 
 func TestParseAndDescribe(t *testing.T) {
@@ -15,12 +29,12 @@ func TestParseAndDescribe(t *testing.T) {
 		want string
 	}{
 		{
-			name: "weekday range",
-			expr: "0 22 ? * MON-FRI *",
-			want: "Every Monday through Friday at 22:00",
+			name: "Monday through Friday",
+			expr: weekdayRangeExpr,
+			want: workweekDescription,
 		},
 		{
-			name: "weekday range",
+			name: "Tuesday through Saturday",
 			expr: "0 6 ? * TUE-SAT *",
 			want: "Every Tuesday through Saturday at 06:00",
 		},
@@ -48,7 +62,7 @@ func TestParseAndDescribe(t *testing.T) {
 				t.Fatalf("Parse() error = %v", err)
 			}
 
-			got, err := humancron.Describe(cron)
+			got, err := humancron.Describe(&cron)
 			if err != nil {
 				t.Fatalf("Describe() error = %v", err)
 			}
@@ -70,11 +84,11 @@ func TestParseRejectsInvalidExpressions(t *testing.T) {
 			expr: "0 22 MON-FRI *",
 		},
 		{
-			name: "invalid minute",
+			name: invalidMinute,
 			expr: "60 22 ? * MON-FRI *",
 		},
 		{
-			name: "invalid hour",
+			name: invalidHour,
 			expr: "0 24 ? * MON-FRI *",
 		},
 		{
@@ -180,7 +194,7 @@ func TestParseRejectsInvalidFieldValues(t *testing.T) {
 		{name: "empty list item", expr: "0 22 1, * MON *"},
 		{name: "month outside range", expr: "0 22 ? 13 MON *"},
 		{name: "invalid month name", expr: "0 22 ? FOO MON *"},
-		{name: "weekday zero", expr: "0 22 ? * 0 *"},
+		{name: "weekday zero", expr: zeroWeekdayExpr},
 		{name: "weekday outside range", expr: "0 22 ? * 8 *"},
 		{name: "weekday malformed range", expr: "0 22 ? * MON-TUE-WED *"},
 		{name: "weekday step", expr: "0 22 ? * MON/2 *"},
@@ -233,7 +247,7 @@ func TestDescribeWeekdayListsAndNumericRanges(t *testing.T) {
 				t.Fatalf("Parse() error = %v", err)
 			}
 
-			got, err := humancron.Describe(cron)
+			got, err := humancron.Describe(&cron)
 			if err != nil {
 				t.Fatalf("Describe() error = %v", err)
 			}
@@ -269,7 +283,7 @@ func TestDescribeMonthlyDayOfMonth(t *testing.T) {
 				t.Fatalf("Parse() error = %v", err)
 			}
 
-			got, err := humancron.Describe(cron)
+			got, err := humancron.Describe(&cron)
 			if err != nil {
 				t.Fatalf("Describe() error = %v", err)
 			}
@@ -306,18 +320,18 @@ func TestDescribeRejectsInvalidWeekdayAndTime(t *testing.T) {
 			cron: humancron.Cron{Minute: "0", Hour: "0", DayOfMonth: "?", Month: "*", DayOfWeek: "8", Year: "*"},
 		},
 		{
-			name: "invalid minute",
-			cron: humancron.Cron{Minute: "x", Hour: "0", DayOfMonth: "?", Month: "*", DayOfWeek: "MON", Year: "*"},
+			name: invalidMinute,
+			cron: humancron.Cron{Minute: "x", Hour: "0", DayOfMonth: "?", Month: "*", DayOfWeek: monday, Year: "*"},
 		},
 		{
-			name: "invalid hour",
-			cron: humancron.Cron{Minute: "0", Hour: "x", DayOfMonth: "?", Month: "*", DayOfWeek: "MON", Year: "*"},
+			name: invalidHour,
+			cron: humancron.Cron{Minute: "0", Hour: "x", DayOfMonth: "?", Month: "*", DayOfWeek: monday, Year: "*"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := humancron.Describe(tt.cron); err == nil {
+			if _, err := humancron.Describe(&tt.cron); err == nil {
 				t.Errorf("Describe() accepted invalid cron %+v", tt.cron)
 			}
 		})
@@ -331,7 +345,7 @@ func TestDescribeRejectsUnsupportedExpressions(t *testing.T) {
 	}{
 		{
 			name: "day-of-month list",
-			expr: "0 22 1,15 * ? *",
+			expr: monthlyListExpr,
 		},
 		{
 			name: "day-of-month with weekday",
@@ -354,7 +368,7 @@ func TestDescribeRejectsUnsupportedExpressions(t *testing.T) {
 				t.Fatalf("Parse() error = %v", err)
 			}
 
-			if _, err := humancron.Describe(cron); err == nil {
+			if _, err := humancron.Describe(&cron); err == nil {
 				t.Errorf(
 					"Describe() accepted unsupported expression %q",
 					tt.expr,
@@ -367,10 +381,10 @@ func TestDescribeRejectsUnsupportedExpressions(t *testing.T) {
 func TestRunCLIDirectExpressions(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runCLI([]string{
-		"0 22 ? * MON-FRI *",
+		weekdayRangeExpr,
 		"60 22 ? * MON *",
-		"15 14 1 * ? *",
-		"0 22 1,15 * ? *",
+		monthlyExpr,
+		monthlyListExpr,
 	}, strings.NewReader(""), &stdout, &stderr)
 
 	want := "0 22 ? * MON-FRI * -> Every Monday through Friday at 22:00\n" +
@@ -385,7 +399,7 @@ func TestRunCLIDirectExpressions(t *testing.T) {
 func TestRunCLIJSON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	input := `["0 22 ? * MON-FRI *","60 22 ? * MON *","15 14 1 * ? *"]`
-	code := runCLI([]string{"--json"}, strings.NewReader(input), &stdout, &stderr)
+	code := runCLI([]string{jsonFlag}, strings.NewReader(input), &stdout, &stderr)
 	want := "0 22 ? * MON-FRI * -> Every Monday through Friday at 22:00\n" +
 		"60 22 ? * MON * -> INVALID: invalid minute: \"60\": must be between 0 and 59\n" +
 		"15 14 1 * ? * -> Every month on the 1st at 14:15\n"
@@ -402,7 +416,7 @@ func TestRunCLIJSON(t *testing.T) {
 
 func TestRunCLIRejectsInvalidJSON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := runCLI([]string{"--json"}, strings.NewReader("not json"), &stdout, &stderr)
+	code := runCLI([]string{jsonFlag}, strings.NewReader("not json"), &stdout, &stderr)
 	if code != 1 || !strings.HasPrefix(stderr.String(), "invalid JSON:") || stdout.Len() != 0 {
 		t.Errorf(
 			"runCLI(--json) = (%d, %q, %q), want status 1 and invalid JSON error",
@@ -427,4 +441,95 @@ func TestRunCLIRejectsUnknownFlag(t *testing.T) {
 	if code != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "unknown") {
 		t.Errorf("runCLI() = (%d, %q, %q), want status 2 and flag error", code, stdout.String(), stderr.String())
 	}
+}
+
+func TestRunCLINumericWeekdayWarnings(t *testing.T) {
+	tests := []struct {
+		name string
+		expr string
+		want string
+		warn bool
+	}{
+		{
+			name: "single number",
+			expr: "0 22 ? * 1 *",
+			want: "Every Sunday at 22:00",
+			warn: true,
+		},
+		{
+			name: "range",
+			expr: "0 22 ? * 2-6 *",
+			want: "Every Monday through Friday at 22:00",
+			warn: true,
+		},
+		{
+			name: "mixed list",
+			expr: "0 22 ? * MON,4,FRI *",
+			want: "Every Monday, Wednesday, Friday at 22:00",
+			warn: true,
+		},
+		{
+			name: "zero-based Sunday",
+			expr: zeroWeekdayExpr,
+			want: `INVALID: invalid day-of-week: "0": must be between 1 and 7`,
+			warn: true,
+		},
+		{
+			name: "named weekdays",
+			expr: weekdayRangeExpr,
+			want: workweekDescription,
+		},
+		{
+			name: "numeric day of month",
+			expr: monthlyExpr,
+			want: "Every month on the 1st at 14:15",
+		},
+		{
+			name: "incomplete expression",
+			expr: "0 22 ? * 1",
+			want: "INVALID: expected 6 fields, got 5",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, jsonMode := range []bool{false, true} {
+				t.Run(fmt.Sprintf("json=%t", jsonMode), func(t *testing.T) {
+					expressions := []string{tt.expr, tt.expr}
+					args, input := warningTestInput(t, expressions, jsonMode)
+					var stdout, stderr bytes.Buffer
+					code := runCLI(args, strings.NewReader(input), &stdout, &stderr)
+					wantOutput := strings.Repeat(tt.expr+" -> "+tt.want+"\n", len(expressions))
+					if code != 0 || stdout.String() != wantOutput {
+						t.Fatalf("runCLI() = (%d, %q), want (0, %q)", code, stdout.String(), wantOutput)
+					}
+
+					wantWarning := ""
+					if tt.warn {
+						wantWarning = strings.Repeat(fmt.Sprintf(
+							"WARNING: %q uses numeric weekdays; AWS/EventBridge uses 1=SUN through 7=SAT, "+
+								"not zero-based numbering. Use three-letter English abbreviations "+
+								"(SUN, MON, TUE, WED, THU, FRI, SAT) to avoid ambiguity.\n",
+							tt.expr,
+						), len(expressions))
+					}
+					if stderr.String() != wantWarning {
+						t.Errorf("stderr = %q, want %q", stderr.String(), wantWarning)
+					}
+				})
+			}
+		})
+	}
+}
+
+func warningTestInput(t *testing.T, expressions []string, jsonMode bool) ([]string, string) {
+	t.Helper()
+	if !jsonMode {
+		return expressions, ""
+	}
+	data, err := json.Marshal(expressions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return []string{jsonFlag}, string(data)
 }
