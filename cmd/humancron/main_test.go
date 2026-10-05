@@ -288,7 +288,14 @@ func TestDescribeRejectsInvalidWeekdayAndTime(t *testing.T) {
 	}{
 		{
 			name: "malformed weekday range",
-			cron: humancron.Cron{Minute: "0", Hour: "0", DayOfMonth: "?", Month: "*", DayOfWeek: "MON-TUE-WED", Year: "*"},
+			cron: humancron.Cron{
+				Minute:     "0",
+				Hour:       "0",
+				DayOfMonth: "?",
+				Month:      "*",
+				DayOfWeek:  "MON-TUE-WED",
+				Year:       "*",
+			},
 		},
 		{
 			name: "unknown weekday",
@@ -383,7 +390,13 @@ func TestRunCLIJSON(t *testing.T) {
 		"60 22 ? * MON * -> INVALID: invalid minute: \"60\": must be between 0 and 59\n" +
 		"15 14 1 * ? * -> Every month on the 1st at 14:15\n"
 	if code != 0 || stdout.String() != want || stderr.Len() != 0 {
-		t.Errorf("runCLI(--json) = (%d, %q, %q), want (0, %q, empty stderr)", code, stdout.String(), stderr.String(), want)
+		t.Errorf(
+			"runCLI(--json) = (%d, %q, %q), want (0, %q, empty stderr)",
+			code,
+			stdout.String(),
+			stderr.String(),
+			want,
+		)
 	}
 }
 
@@ -391,7 +404,12 @@ func TestRunCLIRejectsInvalidJSON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runCLI([]string{"--json"}, strings.NewReader("not json"), &stdout, &stderr)
 	if code != 1 || !strings.HasPrefix(stderr.String(), "invalid JSON:") || stdout.Len() != 0 {
-		t.Errorf("runCLI(--json) = (%d, %q, %q), want status 1 and invalid JSON error", code, stdout.String(), stderr.String())
+		t.Errorf(
+			"runCLI(--json) = (%d, %q, %q), want status 1 and invalid JSON error",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 }
 

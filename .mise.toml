@@ -1,0 +1,44 @@
+[tools]
+# Keep the linter before Go so an older copy in Go's bin directory cannot shadow it.
+golangci-lint = "2.14.0"
+go = "1.25.14"
+
+[tasks.fmt]
+description = "Format Go code using the configured golangci-lint formatters"
+run = "golangci-lint fmt"
+
+[tasks."fmt:check"]
+description = "Check Go formatting without changing files"
+run = "golangci-lint fmt --diff"
+
+[tasks.vet]
+description = "Run Go vet on all packages"
+run = "go vet ./..."
+
+[tasks.lint]
+description = "Run golangci-lint with .golangci.yml"
+run = "golangci-lint run"
+
+[tasks.test]
+description = "Run all tests with the race detector"
+run = "go test -race ./..."
+
+[tasks.coverage]
+description = "Run tests and report coverage"
+run = [
+  "mkdir -p coverage",
+  "go test -race -coverpkg=./... -coverprofile=coverage/coverage.out ./...",
+  "go tool cover -func=coverage/coverage.out",
+]
+
+[tasks.build]
+description = "Compile all packages, including the CLI"
+run = "go build ./..."
+
+[tasks.tidy]
+description = "Tidy Go module dependencies"
+run = "go mod tidy"
+
+[tasks.check]
+description = "Run all non-mutating quality checks"
+depends = ["fmt:check", "vet", "lint", "test", "build"]

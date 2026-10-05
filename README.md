@@ -42,6 +42,34 @@ is Saturday. Weekday names are case-insensitive.
   describing expressions.
 - `cmd/humancron` contains the CLI entrypoint and its tests.
 
+## Development tasks
+
+Install [mise](https://mise.jdx.dev/), then trust the project configuration and
+install the pinned Go and golangci-lint versions:
+
+```bash
+mise trust
+mise install
+mise run check
+```
+
+Available tasks:
+
+| Command | Purpose |
+| --- | --- |
+| `mise run check` | Run formatting checks, vet, lint, race-enabled tests, and compilation |
+| `mise run fmt` | Apply the formatters configured in `.golangci.yml` |
+| `mise run fmt:check` | Check all configured formatters without changing files |
+| `mise run vet` | Run `go vet ./...` |
+| `mise run lint` | Run golangci-lint using `.golangci.yml` |
+| `mise run test` | Run all tests with the race detector |
+| `mise run coverage` | Write `coverage/coverage.out` and print function coverage |
+| `mise run build` | Compile all packages, including the CLI, without writing a binary |
+| `mise run tidy` | Update Go module dependency metadata |
+
+`check` does not apply formatting fixes or tidy dependencies. Lint findings
+cause it to fail; use the individual tasks to run checks separately.
+
 ## Run from the command line
 
 Pass one or more expressions as quoted arguments:
