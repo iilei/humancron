@@ -101,15 +101,54 @@ Output:
 15 14 1 * ? * -> Every month on the 1st at 14:15
 ```
 
-Expressions can also be read as a JSON array of strings from standard input:
+### JSON output and Terraform
+
+Use `--json` with exactly one quoted expression to emit a JSON object:
 
 ```bash
-printf '%s\n' '["0 22 ? * MON-FRI *","15 14 1 * ? *"]' |
+go run ./cmd/humancron --json '0 22 ? * MON-FRI *'
+```
+
+```json
+{
+  "description": "Every Monday through Friday at 22:00",
+  "expression": "0 22 ? * MON-FRI *",
+  "status": "ok"
+}
+```
+
+When no expression argument is supplied, `--json` reads one JSON object with
+string values from standard input. The `expression` field is required and must
+be non-empty; additional string-valued fields are accepted.
+
+```bash
+printf '%s\n' '{"expression":"0 22 ? * MON-FRI *"}' |
   go run ./cmd/humancron --json
 ```
 
-The JSON mode prints one result per expression in the same format as the
-argument mode.
+This input/output contract works directly with Terraform's `external` data
+source (the binary must be installed on the Terraform runner):
+
+```hcl
+data "external" "schedule_description" {
+  program = ["humancron", "--json"]
+  query = {
+    expression = "0 22 ? * MON-FRI *"
+  }
+}
+
+output "schedule_description" {
+  value = data.external.schedule_description.result.description
+}
+```
+
+JSON mode emits exactly one result object on success. Invalid or unsupported
+expressions and malformed input produce a non-zero exit status with an error
+on stderr and no result on stdout. Numeric-weekday warnings remain on stderr.
+More than one expression argument is a usage error. An expression argument
+takes precedence over stdin.
+
+This replaces the previous `--json` array-input/plain-text-output behavior.
 
 ## What is not supported
 
@@ -137,7 +176,7 @@ Output:
 ```
 
 Step expressions such as `*/15` are rejected by the parser. In command-line
-argument mode, each expression is reported independently and processing
+text mode, each expression is reported independently and processing
 continues, and invalid or unsupported expressions do not by themselves produce
 a non-zero exit status. Malformed JSON or command-line usage/flag errors do
 produce a non-zero exit status.

@@ -3,6 +3,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -18,6 +19,12 @@ const (
 	weekdayFieldIndex = 4
 )
 
+type jsonResult struct {
+	Description string `json:"description"`
+	Expression  string `json:"expression"`
+	Status      string `json:"status"`
+}
+
 func main() {
 	os.Exit(runCLI(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
@@ -25,17 +32,21 @@ func main() {
 func runCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("humancron", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	jsonInput := flags.Bool(
+	jsonMode := flags.Bool(
 		"json",
 		false,
-		"read a JSON array of cron expressions from stdin",
+		"emit a JSON result for one expression argument, or read an expression object from stdin",
 	)
 	if err := flags.Parse(args); err != nil {
 		return exitUsage
 	}
 
-	if *jsonInput {
-		if err := runJSON(stdin, stdout, stderr); err != nil {
+	if *jsonMode {
+		if len(flags.Args()) > 1 {
+			fmt.Fprintln(stderr, "--json accepts at most one expression argument")
+			return exitUsage
+		}
+		if err := runJSON(flags.Args(), stdin, stdout, stderr); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
@@ -55,15 +66,54 @@ func runCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func runJSON(input io.Reader, output, stderr io.Writer) error {
-	var expressions []string
-	decoder := json.NewDecoder(input)
-	if err := decoder.Decode(&expressions); err != nil {
-		return fmt.Errorf("invalid JSON: %w", err)
+func runJSON(args []string, input io.Reader, output, stderr io.Writer) error {
+	var expr string
+	if len(args) == 1 {
+		expr = args[0]
+	} else {
+		query, err := readJSONQuery(input)
+		if err != nil {
+			return err
+		}
+		expr = query["expression"]
 	}
 
-	writeDescriptions(expressions, output, stderr)
+	warnNumericWeekday(expr, stderr)
+	cron, err := humancron.Parse(expr)
+	if err != nil {
+		return fmt.Errorf("INVALID: %w", err)
+	}
+	description, err := humancron.Describe(&cron)
+	if err != nil {
+		return fmt.Errorf("UNSUPPORTED: %w", err)
+	}
+	if err := json.NewEncoder(output).Encode(jsonResult{
+		Description: description,
+		Expression:  expr,
+		Status:      "ok",
+	}); err != nil {
+		return fmt.Errorf("writing JSON result: %w", err)
+	}
 	return nil
+}
+
+func readJSONQuery(input io.Reader) (map[string]string, error) {
+	var query map[string]string
+	decoder := json.NewDecoder(input)
+	if err := decoder.Decode(&query); err != nil {
+		return nil, fmt.Errorf("invalid JSON: %w", err)
+	}
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return nil, fmt.Errorf("invalid JSON: %w", err)
+		}
+		return nil, errors.New("invalid JSON: expected exactly one query object")
+	}
+	if strings.TrimSpace(query["expression"]) == "" {
+		return nil, errors.New("invalid JSON: expression must be a non-empty string")
+	}
+	return query, nil
 }
 
 func writeDescriptions(expressions []string, output, stderr io.Writer) {

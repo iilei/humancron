@@ -397,20 +397,15 @@ func TestRunCLIDirectExpressions(t *testing.T) {
 }
 
 func TestRunCLIJSON(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	input := `["0 22 ? * MON-FRI *","60 22 ? * MON *","15 14 1 * ? *"]`
-	code := runCLI([]string{jsonFlag}, strings.NewReader(input), &stdout, &stderr)
-	want := "0 22 ? * MON-FRI * -> Every Monday through Friday at 22:00\n" +
-		"60 22 ? * MON * -> INVALID: invalid minute: \"60\": must be between 0 and 59\n" +
-		"15 14 1 * ? * -> Every month on the 1st at 14:15\n"
-	if code != 0 || stdout.String() != want || stderr.Len() != 0 {
-		t.Errorf(
-			"runCLI(--json) = (%d, %q, %q), want (0, %q, empty stderr)",
-			code,
-			stdout.String(),
-			stderr.String(),
-			want,
-		)
+	for _, args := range [][]string{{jsonFlag}, {jsonFlag, weekdayRangeExpr}} {
+		var stdout, stderr bytes.Buffer
+		input := `{"expression":"0 22 ? * MON-FRI *","additional":"allowed"}`
+		code := runCLI(args, strings.NewReader(input), &stdout, &stderr)
+		want := "{\"description\":\"Every Monday through Friday at 22:00\",\"expression\":\"0 22 ? * MON-FRI *\",\"status\":\"ok\"}\n"
+		if code != 0 || stdout.String() != want || stderr.Len() != 0 {
+			t.Errorf("runCLI(--json) = (%d, %q, %q), want (0, %q, empty stderr)",
+				code, stdout.String(), stderr.String(), want)
+		}
 	}
 }
 
@@ -493,15 +488,21 @@ func TestRunCLINumericWeekdayWarnings(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			for _, jsonMode := range []bool{false, true} {
-				t.Run(fmt.Sprintf("json=%t", jsonMode), func(t *testing.T) {
+			for _, mode := range []string{"text", "json argument", "json stdin"} {
+				t.Run(mode, func(t *testing.T) {
 					expressions := []string{tt.expr, tt.expr}
-					args, input := warningTestInput(t, expressions, jsonMode)
+					args, input := warningTestInput(t, expressions, mode)
 					var stdout, stderr bytes.Buffer
 					code := runCLI(args, strings.NewReader(input), &stdout, &stderr)
 					wantOutput := strings.Repeat(tt.expr+" -> "+tt.want+"\n", len(expressions))
-					if code != 0 || stdout.String() != wantOutput {
-						t.Fatalf("runCLI() = (%d, %q), want (0, %q)", code, stdout.String(), wantOutput)
+					wantCode := 0
+					wantError := ""
+					if mode != "text" {
+						expressions = expressions[:1]
+						wantOutput, wantCode, wantError = warningJSONExpected(t, tt.expr, tt.want)
+					}
+					if code != wantCode || stdout.String() != wantOutput {
+						t.Fatalf("runCLI() = (%d, %q), want (%d, %q)", code, stdout.String(), wantCode, wantOutput)
 					}
 
 					wantWarning := ""
@@ -513,8 +514,8 @@ func TestRunCLINumericWeekdayWarnings(t *testing.T) {
 							tt.expr,
 						), len(expressions))
 					}
-					if stderr.String() != wantWarning {
-						t.Errorf("stderr = %q, want %q", stderr.String(), wantWarning)
+					if stderr.String() != wantWarning+wantError {
+						t.Errorf("stderr = %q, want %q", stderr.String(), wantWarning+wantError)
 					}
 				})
 			}
@@ -522,14 +523,70 @@ func TestRunCLINumericWeekdayWarnings(t *testing.T) {
 	}
 }
 
-func warningTestInput(t *testing.T, expressions []string, jsonMode bool) ([]string, string) {
+func warningTestInput(t *testing.T, expressions []string, mode string) ([]string, string) {
 	t.Helper()
-	if !jsonMode {
+	if mode == "text" {
 		return expressions, ""
 	}
-	data, err := json.Marshal(expressions)
+	if mode == "json argument" {
+		return []string{jsonFlag, expressions[0]}, ""
+	}
+	data, err := json.Marshal(map[string]string{"expression": expressions[0]})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return []string{jsonFlag}, string(data)
+}
+
+func warningJSONExpected(t *testing.T, expr, description string) (string, int, string) {
+	t.Helper()
+	if strings.HasPrefix(description, "INVALID:") {
+		return "", 1, description + "\n"
+	}
+	data, err := json.Marshal(jsonResult{Description: description, Expression: expr, Status: "ok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data) + "\n", 0, ""
+}
+
+func TestRunCLIJSONFailures(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		error string
+		args  []string
+		code  int
+	}{
+		{name: "array", input: `["0 22 ? * MON *"]`, code: 1, error: "invalid JSON:"},
+		{name: "null", input: `null`, code: 1, error: "expression must be"},
+		{name: "missing expression", input: `{}`, code: 1, error: "expression must be"},
+		{name: "blank expression", input: `{"expression":" "}`, code: 1, error: "expression must be"},
+		{name: "non-string", input: `{"expression":1}`, code: 1, error: "invalid JSON:"},
+		{name: "trailing object", input: `{"expression":"0 22 ? * MON *"} {}`, code: 1, error: "exactly one"},
+		{name: "trailing garbage", input: `{"expression":"0 22 ? * MON *"} !`, code: 1, error: "invalid JSON:"},
+		{name: "empty stdin", code: 1, error: "invalid JSON:"},
+		{name: "invalid argument", args: []string{jsonFlag, "invalid"}, code: 1, error: "INVALID:"},
+		{name: "unsupported argument", args: []string{jsonFlag, monthlyListExpr}, code: 1, error: "UNSUPPORTED:"},
+		{
+			name:  "extra argument",
+			args:  []string{jsonFlag, weekdayRangeExpr, monthlyExpr},
+			code:  exitUsage,
+			error: "at most one",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := tt.args
+			if args == nil {
+				args = []string{jsonFlag}
+			}
+			var stdout, stderr bytes.Buffer
+			code := runCLI(args, strings.NewReader(tt.input), &stdout, &stderr)
+			if code != tt.code || stdout.Len() != 0 || !strings.Contains(stderr.String(), tt.error) {
+				t.Fatalf("runCLI() = (%d, %q, %q), want (%d, empty stdout, error containing %q)",
+					code, stdout.String(), stderr.String(), tt.code, tt.error)
+			}
+		})
+	}
 }
